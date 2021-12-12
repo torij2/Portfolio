@@ -1,0 +1,46 @@
+---
+title: "Classes"
+author: "Tori"
+date: "10/4/2021"
+output: html_document
+---
+
+  
+```{r}
+library(readr)
+library(dplyr)
+library(tidyr)
+library("stringr")
+library(ggplot2)
+
+df1<- read_csv("CU_ACAD_DEPT_WHEN_OFF_ENRL_22740.csv",skip=1)
+df2 <- df1 %>% select(`Tot Enrl`, Subject, Catalog, Term...8, Component) 
+
+df2 <- df2 %>% filter(Subject == "MA", Catalog %in% c(131,132), Component == "LEC") %>%
+  rename(Term=Term...8) %>%
+  rename(Enrl = `Tot Enrl`) %>%
+  separate(Term,c("Term","Year"))
+
+df2 <- df2 %>% filter((Term == "Fall" & Catalog == 131) | (Term == "Spring" & Catalog == 132))
+
+df2$course <- paste(df2$Subject, df2$Catalog, sep = "")
+
+df3 <- df2 %>% group_by(Term, Year, course) %>%
+  summarise(Totenrl = sum(Enrl))
+
+df4 <- df3 %>% mutate(Year = as.numeric(Year)) %>% 
+  mutate(Year = Year - 2000) %>%
+  mutate(ay = case_when(Term == "Fall" ~str_c(Year, "-", Year + 1),
+                                           Term == "Spring" ~str_c(Year - 1, "-", Year)))
+
+df5 <- df4 %>% pivot_wider(ay, names_from = c(course, Term), values_from = Totenrl) %>%
+  arrange(ay)
+
+df6 <- df5 [!(df5$ay == "21-22"),]
+
+ggplot(df6, aes(MA131_Fall, MA132_Spring)) +
+geom_point() +
+geom_point(data = df6, aes(y = MA132_Spring), size = 1) +
+geom_smooth(method = "lm", col = "black")
+```
+

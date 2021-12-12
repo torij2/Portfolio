@@ -1,0 +1,375 @@
+---
+title: "Is Denny's Close to Laquinta?"
+output: html_document
+author: Weiyun Huang, Kyle Monette, Jordan Patoine, Victoria York
+date: October 28, 2021
+---
+
+
+```{r load-packages, message = FALSE}
+library(tidyverse)
+library(devtools)
+# to install dsbox, devtools::install_github("rstudio-education/dsbox")
+library(dsbox)
+library(kableExtra)
+```
+
+The purpose of this project is to check the validity of the joke made by comedian [Mitch Hedberg](https://en.wikipedia.org/wiki/Mitch_Hedberg) when he said "La Quinta is Spanish for ‘next to Denny’s'". We approached this problem by first finding the average distance between a La Quinta and its nearest Denny’s by state (data courtesy of datascienceinabox.org).
+
+To test the validity of this statement, we decided to see if Denny’s was closer to La Quinta’s on average then a given fast food restaurant. To do so we used sample data of a subset of 10000 fast food restaurants locations around the US along with data showing the locations of Denny’s and La Quinta’s.
+
+```{r}
+states <- read_csv("states.csv", show_col_types = FALSE)
+rest <- read_csv("FastFoodRestaurants.csv", col_types = cols(address = col_skip(), keys = col_skip(), websites = col_skip()), show_col_types = FALSE) %>%
+  rename(state = province)
+
+# create local copy of data sets from dsbox
+dennys <- dsbox::dennys
+laquinta <- dsbox::laquinta
+```
+
+
+```{r haversine, echo=FALSE}
+haversine = function(long1, lat1, long2, lat2, round = 3) {
+  # convert to radians
+  long1 = long1 * pi / 180
+  lat1  = lat1  * pi / 180
+  long2 = long2 * pi / 180
+  lat2  = lat2  * pi / 180
+  
+  # Earth mean radius in km
+  R = 6371
+  a = sin((lat2 - lat1)/2)^2 + cos(lat1) * cos(lat2) * sin((long2 - long1)/2)^2
+  d = R * 2 * asin(sqrt(a))
+  
+  # outputs distance in miles (because we're not Brits)
+  return(round(d/1.609, round))
+}
+```
+
+```{r rest_state, echo = FALSE}
+rest_state = function (this_state, this_rest) 
+{
+  # filter dennys and laquinta by the state
+  dn_state <- dennys %>%
+    filter(state == this_state)
+  lq_state = laquinta %>%
+    filter(state == this_state)
+  
+  # create data frame of all this_rest in this_state
+  this_rest_state <- rest %>%
+    filter(state == this_state & name == this_rest)
+  
+  n_this_rest_state = nrow(this_rest_state)
+  n_dn_state = nrow(dn_state)
+  n_lq_state = nrow(lq_state)
+  # We need an equal number of occurrences of this_rest and dennys per state
+  # to ensure the (later) statistical test is less biased. 
+  # Therefore, choose the minimum of these values
+  n_min = min(n_this_rest_state, n_dn_state, n_lq_state)
+  
+  # create subsets that have n_min rows, randomly chosen
+  dn_sub <- dn_state[sample(nrow(dn_state), n_min),]
+  rest_sub <- this_rest_state[sample(nrow(this_rest_state), n_min),]
+  lq_sub <- lq_state[sample(nrow(lq_state), n_min),]
+  
+  # make filtered data frames by state that have the randomly selected locations
+  # then compute the distances from each restaurant to the other
+  dn_lq_state <- full_join(lq_sub, dn_sub, by = "state") %>%
+    mutate(
+      distance = haversine(longitude.x, latitude.x, longitude.y, latitude.y)
+    )
+  rest_lq_state <- full_join(lq_sub, rest_sub, by = "state") %>%
+    rename(address.x = address) %>%
+    mutate(
+      distance = haversine(longitude.x, latitude.x, longitude.y, latitude.y)
+    )
+  
+  # compute the minimum distances from the above data frames
+  dn_lq_state_mindist <- dn_lq_state %>%
+    group_by(address.x) %>%
+    summarise(closest = min(distance))
+  rest_lq_state_mindist <- rest_lq_state %>%
+    group_by(address.x) %>%
+    summarise(closest = min(distance))
+  
+  # it is best to "stack" the data at this point: create 1 column for distance,
+  # and 1 column for the place (the restaurant that's being compared to laquinta)
+  df1 <- rest_lq_state_mindist %>%
+    mutate(place = this_rest) %>%
+    select(closest, place)
+  df2 <- dn_lq_state_mindist %>%
+    mutate(place = "Dennys") %>%
+    select(closest, place)
+  
+  # create the stacked data, and return the 2 col data frame
+  # this is also done to be able to return the entire data frame
+  df <- bind_rows(df1, df2)
+  return(df)
+}
+```
+
+```{r state_pvalue, echo=FALSE}
+state_pvalue = function(df, this_rest)
+{
+  # create 2 data frames (one for Dennys, one for the other restaurant)
+  # this is needed to run the t.test
+  df_dn <- df %>% filter(place == "Dennys")
+  df_rest <- df %>% filter(place == this_rest)
+  # var.equal is false because we cannot assume the distributions have the same variances
+  test = t.test(df_dn$closest, df_rest$closest, alternative = "less" , var.equal = FALSE)
+  
+  #return the test "matrix" of parameter values (mean, p-value, sd, etc)
+  return(test)
+}
+```
+
+```{r analyze_rest, echo=FALSE}
+analyze_rest = function(this_rest, num_itr, alpha)
+{
+  # determine how many lq's, dn's, and this_rest's are in each state
+  lq_count <- laquinta %>%
+    group_by(state) %>%
+    select(state) %>%
+    filter(state %in% states$abbreviation) %>%
+    mutate(num_state = n()) %>%
+    distinct()
+  
+  dn_count <- dennys %>%
+    group_by(state) %>%
+    select(state) %>%
+    filter(state %in% states$abbreviation) %>%
+    mutate(num_state = n()) %>%
+    distinct()
+  
+  this_rest_count <- rest %>%
+    select(state, name) %>%
+    group_by(state) %>%
+    filter(state %in% states$abbreviation) %>%
+    filter(name == this_rest) %>%
+    mutate(num_state = n()) %>%
+    distinct()
+  
+  # join the above 3 data frames together for comparison/filtering purposes
+  rest_count <- full_join(lq_count, dn_count, by = "state") %>%
+    rename(lq = num_state.x, dn = num_state.y)
+  
+  rest_count <- full_join(rest_count, this_rest_count, by = "state") %>%
+    rename(this_rest = num_state) %>%
+    # the t-test requires > 1 of each restaurant in each state
+    # here we choose the following cutoffs to ensure reasonable conclusions
+    filter(lq > 5 && dn > 5 && this_rest > 5)
+  
+  # set the value of alpha for the test
+  #alpha = 0.1
+  
+  # in each state, num_itr says how many random samples we should take before
+  # averaging the p-values. Note the computational cost by increasing num_itr.
+  #num_itr = 10
+  rest_states_pvalues <- rest_count %>%
+    select(state) %>%
+    rowwise() %>%
+    mutate(
+      avg_pvalue = mean(replicate(num_itr, {state_pvalue(rest_state(state, this_rest), this_rest)$p.value }))
+    ) %>%
+    # only include those that have a statistically significant p-value
+    filter(avg_pvalue < alpha)
+  
+  #return a data frame of states that have significant p-values for the given this_rest
+  return(rest_states_pvalues)
+}
+```
+
+
+```{r create_plot, echo= FALSE, results='asis'}
+create_plot = function(this_rest, num_itr, alpha)
+{
+  rest_states_pvalues <- analyze_rest(this_rest, num_itr, alpha)
+  # if no states for this_rest have significant p-values, we can't create the table below.
+  if (nrow(rest_states_pvalues) == 0)
+  {
+    cat("No states had a significant p-value","\n")
+  } else {
+    rest_states_pvalues %>%
+      kbl(col.names = c("State", "P-value"), caption = "Significant p-values", digits = 4) %>%
+      kable_minimal(full_width = F, position = "left")
+    
+    # create data frame of states that had significant p-values
+    df <- rest_states_pvalues %>% select(state)
+    # iterate through and print plots and summaries 
+    for (i in 1:nrow(df)) 
+    {
+      # run functions above on each state in the list of df
+      state_df <- rest_state(df$state[i], this_rest)
+      
+      # create the plots using ggplot
+      print(ggplot(state_df, aes(x = closest, fill = place))
+          + geom_density(alpha = 0.25) 
+          + ggtitle(paste("Dennys and", this_rest, "in", df$state[i]))
+          + labs(x = "Distance from Laquinta (mi)", y = "Density", fill = "Restaurants"))
+      
+      # output the state so we can tell what the summary is for
+      print("\n")
+      print(df$state[i])
+      print("Dennys")
+      print(summary(state_df %>% filter(place == "Dennys")))
+      print("\n")
+      print(this_rest)
+      print(summary(state_df %>% filter(place == this_rest)))
+    }
+  }
+}
+```
+
+## Explanation of Functions
+
+We use the following functions, which are called nested in this order:
+
+The function ```rest_state``` takes in a state and restaurant and outputs a data frame. The data frame is grouped by the name of restaurants (Dennys and the input one), and contains the minimum distance to the nearest Laquinta.
+
+The function ```haversine``` takes in two pairs of longitude and latitude coordinates, and uses the Haversine formula to compute the Euclidean distance between the two objects.
+
+The function ```state_pvalue``` takes in a data frame (namely the output of ```rest_state```) and a restaurant as inputs. The point of this function is to compute the t-test values (mean, p-value, standard deviation, etc.) for the test in which mean distance of Dennys to Laquinta is compared to the given restaurant to Laquinta. The output is this list of results from the t-test.
+
+The function ```analyze_rest``` takes in a restaurant, number of iterations, and alpha, and outputs a data frame with states and their p-values if the p-values are statistically significant. It was necessary to include ```state_pvalue``` as a separate function to have the ```replicate``` function inside ```analyze_rest``` work; it also makes the program more modular.
+
+The function ```create_plot``` is a global function that takes a restaurant, the number of iterations to be done per state, and the alpha level for the test as input, and outputs the distribution plots as well as summary statistic values. This allows us to only enter one variable into one function.
+
+## Statistical Test
+
+Here, we consider the two-sample t-test, with null hypothesis that the mean distance from Dennys to Laquinta equals the mean distance from a given restaurant to Laquinta. Therefore, the alternative hypothesis is that the average distance from Dennys to Laquinta is less than that of another restaurant to Laquinta.
+
+## Small-Scale Example
+
+Let's consider McDonald's in California. We specify ```num_itr```, the number of random samples in each state that should be taken to compute the test, and ```alpha```, the significance level for the t-test.
+
+Here, the code is modified from the ```analyze_rest``` and ```create_plot``` functions.
+
+```{r, results = 'asis'}
+num_itr = 100
+alpha = 0.1
+
+# determine how many lq's, dn's, and McDonald's are in CA
+lq_count <- laquinta %>%
+  group_by(state) %>%
+  select(state) %>%
+  filter(state == "CA") %>%
+  mutate(num_state = n()) %>%
+  distinct()
+dn_count <- dennys %>%
+  group_by(state) %>%
+  select(state) %>%
+  filter(state == "CA") %>%
+  mutate(num_state = n()) %>%
+  distinct()
+this_rest_count <- rest %>%
+  select(state, name) %>%
+  group_by(state) %>%
+  filter(state == "CA") %>%
+  filter(name == "McDonald's") %>%
+  mutate(num_state = n()) %>%
+  distinct()
+  
+# join the above 3 data frames together for comparison/filtering purposes
+rest_count <- full_join(lq_count, dn_count, by = "state") %>%
+  rename(lq = num_state.x, dn = num_state.y)
+
+rest_count <- full_join(rest_count, this_rest_count, by = "state") %>%
+  rename("McDonald's" = num_state) %>%
+  # the t-test requires > 1 of each restaurant in each state
+  # here we choose the following cutoffs to ensure reasonable conclusions
+  filter(lq > 5 && dn > 5 && "McDonald's" > 5)
+  
+# in each state, num_itr says how many random samples we should take before
+# averaging the p-values. Note the computational cost by increasing num_itr.
+  
+rest_states_pvalues <- rest_count %>%
+    select(state) %>%
+    rowwise() %>%
+    mutate(avg_pvalue = mean(replicate(num_itr, 
+          {state_pvalue(rest_state(state, "McDonald's"), "McDonald's")$p.value }
+        )
+      )
+    ) %>%
+    # only include those that have a statistically significant p-value
+    filter(avg_pvalue < alpha)
+
+ca_df <- rest_state("CA", "McDonald's")
+print(ggplot(ca_df, aes(x = closest, fill = place))
+  + geom_density(alpha = 0.25) 
+  + ggtitle(paste("Dennys and McDonald's in CA"))
+   + labs(x = "Distance from Laquinta (mi)", y = "Density", fill = "Restaurants"))
+      
+print("Dennys")
+print(summary(ca_df %>% filter(place == "Dennys")))
+print("McDonald's")
+print(summary(ca_df %>% filter(place == "McDonald's")))
+```
+
+## Testing Across Multiple States
+
+### McDonald's
+
+Now we can begin to determine the validity of the joke on a larger scale, namely, while keeping a restaurant fixed and considering all states. Here, we fix McDonald's as a restaurant, and later we will consider others. 
+
+Because a low p-value implies that we reject the null hypothesis, any restaurant-state pair with a p-value less than ```alpha``` means that Dennys is equally as close to Laquinta as given that restaurant is. Therefore, in such restaurant-state pairs Hedberg's joke is not valid. On the other hand, if there are no restaurant-state pairs that are statistically significant, then Hedberg's joke increases in validity.
+
+What follows are the distribution plots and p-values for the respective states (if the p-values were significant).
+
+We'll decrease ```num_itr``` at this point for faster computations, and keep ```alpha``` the same at ```r alpha```.
+
+```{r}
+num_itr = 20
+```
+
+```{r, results = 'asis'}
+this_rest = "McDonald's"
+create_plot(this_rest, num_itr, alpha)
+```
+### Wendy's
+
+```{r, results = 'asis'}
+create_plot("Wendy's", num_itr, alpha)
+```
+
+### Burger King
+
+```{r, results = 'asis'}
+create_plot("Burger King", num_itr, alpha)
+```
+
+### Domino's Pizza
+
+```{r, results = 'asis'}
+create_plot("Domino's Pizza", num_itr, alpha)
+```
+
+## Conclusion
+
+For most restaurants, it appears that Hedberg's joke is valid. After running many simulations, we found that there were only a few restaurants that had a statistically equal mean distance to Laquinta as Dennys does. That is, for a fixed restaurant, in almost all of the states (within approximately five) we expect to have Dennys be closer on average. It was often the case that no restaurants in no states were closer to Laquintas than Dennys was.  
+
+## Appendix: Code
+
+### Haversine Function
+
+```{r haversine, eval=FALSE}
+```
+
+### rest_state Function
+
+```{r rest_state, eval=FALSE}
+```
+
+### state_pvalue Function
+```{r state_pvalue, eval=FALSE}
+```
+
+### analyze_state Function
+```{r analyze_rest, eval=FALSE}
+```
+
+### create_plot Function
+```{r create_plot, eval=FALSE}
+```
+
+

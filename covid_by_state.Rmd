@@ -1,0 +1,78 @@
+---
+title: "Covid Data by State"
+author: Victoria York
+date: Sept 26 2021
+output: html_notebook
+---
+The goal of this program is to show the number of deaths from covid per day in the states of New York, Florida, Connecticut, Massachusetts, New Jersey, Texas, California, Washington, Illinois and Idaho. 
+We took data from the New York Times and downloaded the file into this program. In the first code chunck we will be assinging this code the varible name of covid. 
+```{r}
+library(ggplot2)
+library(readr)
+library(dplyr)
+library(glue)
+library(lubridate)
+library(scales)
+covid <- read_csv("covid_data_cdc.csv")
+```
+
+Next we will create a varible that will hold a vector of the names of the states that we wish to include in our data. 
+
+```{r select-states}
+states <- c(
+  "NY",
+  "FL",
+  "CT",
+  "MA",
+  "NJ",
+  "TX",
+  "CA",
+  "WA",
+  "IL",
+  "ID"
+)
+```
+
+In the following code chunk we filter the data frame for deaths in the states we specified above and calculate cumulative number of deaths.
+
+```{r}
+state_data <- covid %>% 
+  # only includes states within our state vector
+  filter(state %in% states) %>%
+  # only includes positive new death values
+  filter(new_death >= 0) %>%
+  group_by(state, submission_date) %>%
+  # arrange by date in ascending order
+  arrange(submission_date) %>%
+  ungroup()
+
+state_data$submission_date <- as.Date(state_data$submission_date, "%m/%d/%Y")
+```
+
+The following visualisation shows the number of deaths vs. days elapsed in various states in the US.
+
+```{r}
+ggplot(data = state_data,
+       mapping = aes(x = submission_date, 
+                     y = new_death, 
+                     color = state,
+                     group = state,
+                     label = state)) +
+  # represent cumulative cases with lines
+  geom_line(size = 0.7, alpha = 0.8) +
+  # use pretty colors
+  scale_color_viridis_d() +
+  # better formatting for y-axis
+  scale_y_continuous(labels = label_comma()) +
+  # use minimal theme
+  theme_minimal() +
+  # customize labels
+  labs(
+    x = "Date",
+    y = "Number of deaths",
+    title = "Deaths from COVID-19, Selected States",
+    caption = "Source: https://data.cdc.gov/Case-Surveillance/United-States-COVID-19-Cases-and-Deaths-by-State-o/9mfq-cb36/data"
+  )
+```
+
+To further better this data I think it would be useful to make the graphs graph the percentage of covid deaths in the population. This would show porortionaly which states are struggling the most. 

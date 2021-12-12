@@ -1,0 +1,156 @@
+---
+title: "Lab 04 - La Quinta is Spanish for next to Denny's, Pt. 1"
+author: "Victoria York"
+date: "Oct 8 2021"
+output: github_document
+---
+
+### Load packages and data
+
+```{r load-packages, message = FALSE}
+library(tidyverse) 
+library(dsbox) 
+library(readr)
+```
+
+```{r load-data, message = FALSE}
+states <- read_csv("states.csv")
+dennys <- dsbox::dennys
+laquinta <- dsbox::laquinta
+```
+
+### Exercise 1
+
+```{r}
+nrow(dennys)
+ncol(dennys)
+```
+dimentions: rows: 1643, columns: 6. 
+each row represents a Denny's location. 
+the varibles are adress, city, state, zip, longitude, latitude
+
+### Exercise 2
+
+```{r}
+nrow(laquinta)
+ncol(laquinta)
+```
+dimention: rows: 909, columns: 6
+each row represents a La Quinta's location. 
+the varibles are adress, city, state, zip, longatude, latitude 
+
+### Exercise 3
+
+La Quinta has locations in: Canada, Mexico, New Zealand, Honduras, Turkey, United Arab Emirates, Chile and Colombia. But Denny's does not have any locations outside of the US. 
+
+### Exercise 4
+
+Have the location split up into country and province. Then we could filter by the country not being the US. 
+
+### Exercise 5
+
+```{r}
+dennys %>%
+  filter(!(state %in% states$abbreviation))
+```
+No there are no Denny's outside the US 
+
+### Exercise 6
+
+```{r}
+dennys <- dennys %>%
+  mutate(country = "United States")
+```
+
+# Exercise 7
+
+Canada: 
+British Columbia - BC
+Ontario - ON
+
+Mexico:
+AG
+VE
+PU
+SL
+
+New Zealand:
+Not in data set
+
+Honduras:
+FM
+
+Turkey:
+None were in data set
+
+United Arab Emirates:
+Not in data set
+
+Chile:
+Not in dats set
+
+Colombia:
+ANT
+
+# Exercise 8
+
+```{r}
+laquinta <- laquinta %>%
+  mutate(country = case_when(
+    state %in% state.abb     ~ "United States",
+    state %in% c("ON", "BC") ~ "Canada",
+    state == "ANT"           ~ "Colombia",
+    state %in% c("AG", "VE", "PU", "SL") ~ "Mexico",
+    state == "FM" ~ "Honduras"
+  ))
+
+laquinta <- laquinta %>%
+  filter(country == "United States")
+```
+
+# Exercise 9
+
+```{r}
+numofdennys <- dennys %>%
+  count(state) %>%
+  inner_join(states, by = c("state" = "abbreviation"))
+
+```
+
+
+#Exercise 10
+
+```{r}
+dennys <- dennys %>%
+  mutate(establishment = "Denny's")
+laquinta <- laquinta %>%
+  mutate(establishment = "La Quinta")
+
+dn_lq <- bind_rows(dennys, laquinta)
+
+ggplot(dn_lq, mapping = aes(x = longitude, y = latitude, color = establishment)) +
+  geom_point()
+```
+
+#Exercise 11
+
+```{r}
+northcar <- dn_lq %>% filter(state == "NC")
+
+ggplot(northcar, mapping = aes(x = longitude, y = latitude, color = establishment)) +
+  geom_point()
+```
+
+#Exercise 12
+
+```{r}
+texas <- dn_lq %>% filter(state == "TX")
+
+ggplot(texas, mapping = aes(x = longitude, y = latitude, color = establishment)) +
+  geom_point()
+```
+
+Note: I had time to do the whole lab except ran out of time to play with the alpha function. I did try to get it to work but was unsucessful. 
+
+
+
